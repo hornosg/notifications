@@ -14,6 +14,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	notificationconfig "notifications/src/notification/infrastructure/config"
+	sharedconfig "notifications/src/shared/config"
 	"notifications/src/shared/database"
 )
 
@@ -52,11 +54,13 @@ func main() {
 		r.Use(database.TenantSession(db, log))
 	}
 
-	// ── Rutas del dominio (montar acá los handlers de src/notifications/...) ──
+	cfg, err := sharedconfig.LoadConfig()
+	if err != nil {
+		log.Fatal("no pude cargar la configuración", zap.Error(err))
+	}
+
 	api := r.Group("/api/v1")
-	api.GET("/example", func(c *gin.Context) {
-		c.JSON(200, gin.H{"ok": true, "tenant_scoped": multitenant})
-	})
+	notificationconfig.SetupNotificationModule(api, cfg, db)
 
 	log.Info("starting", zap.String("service", "notifications"), zap.String("port", port))
 	if err := r.Run(":" + port); err != nil {

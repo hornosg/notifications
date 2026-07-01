@@ -34,8 +34,15 @@ type TemplateRepository interface {
 }
 
 // TemplateService renderiza templates por ID o por acción/tipo.
+//
+// Todos los métodos que pueden tocar TemplateRepository reciben ctx: el legacy
+// notification-service resolvía el namespace abriendo su propia transacción con
+// postgres.ContextWithRLS(context.Background(), ...), pero acá no hay tal atajo — la
+// única conexión válida es la que trae los GUC de sesión ya fijados por
+// database.TenantSession (ver ADR-001). Sin ctx del caller no hay namespace real que
+// resolver.
 type TemplateService interface {
-	RenderTemplateByAction(action domain.NotificationAction, notificationType domain.NotificationType, data map[string]interface{}) (subject string, html string, err error)
+	RenderTemplateByAction(ctx context.Context, action domain.NotificationAction, notificationType domain.NotificationType, data map[string]interface{}) (subject string, html string, err error)
 	RenderTemplate(templateID string, data map[string]interface{}) (subject string, html string, err error)
 	GetTemplate(templateID string) (*domain.Template, error)
 	GetTemplateByAction(ctx context.Context, action domain.NotificationAction, notificationType domain.NotificationType) (*domain.Template, error)

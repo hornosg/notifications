@@ -63,7 +63,7 @@ func TenantSession(db *sql.DB, log *zap.Logger) gin.HandlerFunc {
 			return
 		}
 
-		namespace, ok := namespaceFromValidatedClaims(c)
+		namespace, ok := NamespaceFromClaims(c)
 		if !ok && !isSystemAdmin {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "missing namespace claim"})
 			return
@@ -131,11 +131,16 @@ func resetTenantSession(ctx context.Context, conn *sql.Conn, log *zap.Logger) {
 	}
 }
 
-// namespaceFromValidatedClaims extrae el claim "namespace" de los claims JWT ya validados
+// NamespaceFromClaims extrae el claim "namespace" de los claims JWT ya validados
 // por tenantmw.TenantValidation (firma verificada). Nunca lee de un header — ver comentario
 // de TenantSession. ok=false cuando no hay claim (p. ej. bypass histórico de tenant sin
 // claims, o token S2S sin namespace).
-func namespaceFromValidatedClaims(c *gin.Context) (string, bool) {
+//
+// Exportada para que src/shared/middleware la reuse al armar el contexto de aplicación
+// (appctx.WithRLS): el legacy notification-service tenía un NamespaceFromGin que caía a
+// leer el header X-Namespace sin autenticar — el CRITICAL original que motivó E23/E07.
+// Un solo punto de resolución de namespace (acá) evita reintroducir ese bug.
+func NamespaceFromClaims(c *gin.Context) (string, bool) {
 	v, exists := c.Get("jwt_claims")
 	if !exists {
 		return "", false
@@ -209,6 +214,32 @@ func ConnFromContext(ctx context.Context) *sql.Conn {
 		return conn
 	}
 	return nil
+}
+
+// WithScopedConn replica TenantSession para código que corre FUERA del ciclo HTTP (p. ej.
+// el worker SQS): no hay gin.Context ni JWT de request, así que namespace/tenantID los
+// resuelve el propio worker desde el mensaje ya persistido/validado, no de un header. Fija
+// una conexión, setea los GUC, ejecuta fn con esa conexión en el contexto (ConnFromContext),
+// y la resetea/devuelve al pool al terminar — mismo fail-closed que TenantSession.
+func WithScopedConn(ctx context.Context, db *sql.DB, namespace, tenantID string, log *zap.Logger, fn func(scopedCtx context.Context) error) error {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("db unavailable: %w", err)
+	}
+	defer conn.Close()
+	defer resetTenantSession(ctx, conn, log)
+
+	if _, err := conn.ExecContext(ctx, "SELECT set_config('app.tenant_id', $1, false)", tenantID); err != nil {
+		return fmt.Errorf("tenant session failed: %w", err)
+	}
+	if namespace != "" {
+		if _, err := conn.ExecContext(ctx, "SELECT set_config('app.namespace', $1, false)", namespace); err != nil {
+			return fmt.Errorf("namespace session failed: %w", err)
+		}
+	}
+
+	scopedCtx := context.WithValue(ctx, connCtxKey, conn)
+	return fn(scopedCtx)
 }
 
 func env(k, def string) string {
