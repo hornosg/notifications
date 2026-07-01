@@ -1,0 +1,82 @@
+version: '3.8'
+
+# notifications — compose para desarrollo aislado sobre el lab compartido (lab-network).
+# Requiere infra corriendo:  make -C ~/Projects infra
+#
+# Devy / RULE-09 (separación control-plane / application-plane):
+#   - postgres-setup actúa como CONTROL PLANE: corre como superusuario, crea la DB,
+#     crea el ROL DE APP SIN DDL, aplica migraciones (DDL) y otorga sólo DML al rol de app.
+#   - notifications (el servicio) corre como APP PLANE: conecta con el rol notifications_app,
+#     que no puede CREATE/DROP nada. Un bug en la app no toca infraestructura.
+
+services:
+  # ── CONTROL PLANE: provisioning idempotente (DB + user sin DDL + migraciones) ──
+  postgres-setup:
+    image: pgvector/pgvector:pg15
+    container_name: notifications_postgres_setup
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-notifications}
+    volumes:
+      - ./migrations:/migrations:ro
+    command: >
+      sh -c '
+        set -e
+        H="-h lab-postgres -U ${POSTGRES_USER:-postgres}"
+        echo "› DB notifications" &&
+        psql $$H -tc "SELECT 1 FROM pg_database WHERE datname='"'"'notifications'"'"'" | grep -q 1 \
+          || psql $$H -c "CREATE DATABASE notifications;"
+        echo "› rol de app notifications_app (sin DDL)" &&
+        psql $$H -tc "SELECT 1 FROM pg_roles WHERE rolname='"'"'notifications_app'"'"'" | grep -q 1 \
+          || psql $$H -c "CREATE ROLE notifications_app LOGIN PASSWORD '"'"'$$APP_DB_PASSWORD'"'"' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;"
+        echo "› migraciones (DDL como control-plane)" &&
+        for f in /migrations/*.sql; do echo "  - $$f"; psql $$H -d notifications -v ON_ERROR_STOP=1 -f "$$f"; done
+        echo "› grants DML al rol de app" &&
+        psql $$H -d notifications -c "GRANT USAGE ON SCHEMA public TO notifications_app;"
+        psql $$H -d notifications -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO notifications_app;"
+        psql $$H -d notifications -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO notifications_app;"
+        psql $$H -d notifications -c "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO notifications_app;"
+        echo "✓ provisioning listo"
+      '
+    networks:
+      - lab-network
+
+  notifications:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mc-notifications
+    environment:
+      SERVER_PORT: 8282
+      SERVER_MODE: release
+      MULTITENANT: "true"
+      # App plane: conecta con el rol SIN DDL (RULE-09)
+      DATABASE_HOST: lab-postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: notifications_app
+      DATABASE_PASSWORD: ${APP_DB_PASSWORD:-notifications}
+      DATABASE_NAME: notifications
+      DATABASE_SSL_MODE: disable
+      # Identidad / tenancy (RULE-04/10). JWT emitido por IAM.
+      JWT_SECRET: ${JWT_SECRET}
+      METRICS_ENABLED: "true"
+    ports:
+      - "8282:8282"
+    depends_on:
+      - postgres-setup
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8282/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - "logging=promtail"
+      - "service_name=notifications"
+    networks:
+      - lab-network
+    restart: unless-stopped
+
+networks:
+  lab-network:
+    external: true
