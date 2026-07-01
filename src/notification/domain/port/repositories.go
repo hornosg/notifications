@@ -7,15 +7,21 @@ import (
 )
 
 // NotificationRepository persiste y recupera notificaciones.
+//
+// Los métodos de lectura NO reciben namespace/tenantID: la conexión que usa la
+// implementación (database.ConnFromContext) ya tiene esos valores fijados como GUC de
+// sesión por database.TenantSession, y las policies RLS (002_rls.sql) filtran solas.
+// No repetir el filtro en la query es una decisión explícita — confiar en RLS como única
+// fuente de aislamiento (decisión E23 2026-07-01), no defensa en profundidad con doble filtro.
 type NotificationRepository interface {
 	Save(ctx context.Context, notification *domain.Notification) error
-	FindByID(ctx context.Context, namespace, tenantID, id string) (*domain.Notification, error)
+	FindByID(ctx context.Context, id string) (*domain.Notification, error)
 	Update(ctx context.Context, notification *domain.Notification) error
-	UpdateStatus(ctx context.Context, namespace, tenantID, id string, status domain.NotificationStatus, error string) error
-	FindPendingNotifications(ctx context.Context, namespace, tenantID string) ([]*domain.Notification, error)
+	UpdateStatus(ctx context.Context, id string, status domain.NotificationStatus, error string) error
+	FindPendingNotifications(ctx context.Context) ([]*domain.Notification, error)
 	FindByFilters(ctx context.Context, filters domain.NotificationFilters) ([]*domain.Notification, error)
 	// ExistsByDedupKey es el backstop de idempotencia en DB.
-	ExistsByDedupKey(ctx context.Context, namespace, tenantID, dedupKey string) (bool, error)
+	ExistsByDedupKey(ctx context.Context, dedupKey string) (bool, error)
 }
 
 // TemplateRepository persiste y recupera templates.

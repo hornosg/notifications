@@ -16,6 +16,16 @@ import (
 
 const connKey = "tenant_db_conn"
 
+// connCtxKey stashea la misma conexión fijada del request en el context.Context estándar
+// (no solo en gin.Context), para que repositories — que reciben context.Context, no
+// *gin.Context, por regla de dependencia — puedan usar la conexión con las GUC de
+// tenant/namespace ya seteadas. Sin esto, un repository que use el *sql.DB del pool
+// tomaría una conexión física DISTINTA a la que TenantSession fijó, y las policies RLS
+// no aplicarían.
+type ctxKey string
+
+const connCtxKey ctxKey = "tenant_db_conn"
+
 // Connect abre el pool contra lab-postgres usando el rol de app (sin DDL, RULE-09).
 func Connect() (*sql.DB, error) {
 	dsn := fmt.Sprintf(
@@ -105,6 +115,7 @@ func TenantSession(db *sql.DB, log *zap.Logger) gin.HandlerFunc {
 		}
 
 		c.Set(connKey, conn)
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), connCtxKey, conn))
 		c.Next()
 	}
 }
@@ -183,6 +194,19 @@ func Conn(c *gin.Context) *sql.Conn {
 		if conn, ok := v.(*sql.Conn); ok {
 			return conn
 		}
+	}
+	return nil
+}
+
+// ConnFromContext devuelve la conexión fijada del request desde un context.Context estándar
+// (ver connCtxKey). La usan los repositories: reciben context.Context, no *gin.Context, y
+// confían en que ya trae namespace/tenant_id seteados como GUC — no vuelven a filtrar por
+// WHERE, RLS lo hace (ver decisión E23 2026-07-01, "simplificamos las firmas confiando en RLS").
+// nil cuando se llama fuera de un request HTTP (p. ej. un worker futuro deberá fijar su
+// propia conexión + GUCs de la misma forma que TenantSession).
+func ConnFromContext(ctx context.Context) *sql.Conn {
+	if conn, ok := ctx.Value(connCtxKey).(*sql.Conn); ok {
+		return conn
 	}
 	return nil
 }

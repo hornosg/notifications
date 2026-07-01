@@ -68,12 +68,10 @@ func IsValidAction(action NotificationAction) bool {
 	return false
 }
 
-// NotificationFilters para filtrar notificaciones
-// Namespace/TenantID actúan como scope obligatorio cuando no están vacíos.
-// Cuando están vacíos, el repositorio aplica el default local (DefaultNamespace / "").
+// NotificationFilters para filtrar notificaciones.
+// No lleva Namespace/TenantID: el scope lo aplica RLS solo, vía la conexión con las GUC
+// de sesión ya fijadas por database.TenantSession (decisión E23 2026-07-01).
 type NotificationFilters struct {
-	Namespace string              `json:"namespace,omitempty"`
-	TenantID  string              `json:"tenant_id,omitempty"`
 	Type      *NotificationType   `json:"type,omitempty"`
 	Action    *NotificationAction `json:"action,omitempty"`
 	Recipient *string             `json:"recipient,omitempty"`

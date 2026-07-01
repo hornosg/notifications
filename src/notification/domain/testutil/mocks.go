@@ -22,8 +22,8 @@ func (m *MockNotificationRepository) Save(ctx context.Context, notification *dom
 	return args.Error(0)
 }
 
-func (m *MockNotificationRepository) FindByID(ctx context.Context, namespace, tenantID, id string) (*domain.Notification, error) {
-	args := m.Called(ctx, namespace, tenantID, id)
+func (m *MockNotificationRepository) FindByID(ctx context.Context, id string) (*domain.Notification, error) {
+	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -35,13 +35,13 @@ func (m *MockNotificationRepository) Update(ctx context.Context, notification *d
 	return args.Error(0)
 }
 
-func (m *MockNotificationRepository) UpdateStatus(ctx context.Context, namespace, tenantID, id string, status domain.NotificationStatus, errMsg string) error {
-	args := m.Called(ctx, namespace, tenantID, id, status, errMsg)
+func (m *MockNotificationRepository) UpdateStatus(ctx context.Context, id string, status domain.NotificationStatus, errMsg string) error {
+	args := m.Called(ctx, id, status, errMsg)
 	return args.Error(0)
 }
 
-func (m *MockNotificationRepository) FindPendingNotifications(ctx context.Context, namespace, tenantID string) ([]*domain.Notification, error) {
-	args := m.Called(ctx, namespace, tenantID)
+func (m *MockNotificationRepository) FindPendingNotifications(ctx context.Context) ([]*domain.Notification, error) {
+	args := m.Called(ctx)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -56,8 +56,8 @@ func (m *MockNotificationRepository) FindByFilters(ctx context.Context, filters 
 	return args.Get(0).([]*domain.Notification), args.Error(1)
 }
 
-func (m *MockNotificationRepository) ExistsByDedupKey(ctx context.Context, namespace, tenantID, dedupKey string) (bool, error) {
-	args := m.Called(ctx, namespace, tenantID, dedupKey)
+func (m *MockNotificationRepository) ExistsByDedupKey(ctx context.Context, dedupKey string) (bool, error) {
+	args := m.Called(ctx, dedupKey)
 	return args.Bool(0), args.Error(1)
 }
 

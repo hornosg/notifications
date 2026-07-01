@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	appctx "notifications/src/notification/application/appcontext"
 	"notifications/src/notification/application/response"
 	"notifications/src/notification/domain/port"
 )
@@ -30,10 +29,9 @@ func (uc *GetNotificationUseCase) Execute(ctx context.Context, notificationID st
 		return nil, ErrNotificationNotFound
 	}
 
-	namespace := appctx.NamespaceFromContext(ctx)
-	tenantID := appctx.TenantIDFromContext(ctx)
-
-	notification, err := uc.notificationRepo.FindByID(ctx, namespace, tenantID, notificationID)
+	// namespace/tenant ya vienen resueltos en la conexión (RLS vía database.TenantSession);
+	// no se filtra acá — decisión E23 2026-07-01.
+	notification, err := uc.notificationRepo.FindByID(ctx, notificationID)
 	if err != nil {
 		return nil, ErrNotificationNotFound
 	}

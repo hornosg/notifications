@@ -78,7 +78,8 @@ func (uc *SendNotificationUseCase) isDuplicate(ctx context.Context, req *request
 	namespace := appctx.NamespaceFromContext(ctx)
 
 	if uc.notificationRepo != nil {
-		exists, err := uc.notificationRepo.ExistsByDedupKey(ctx, namespace, req.TenantID, req.DedupKey)
+		// namespace/tenant ya vienen resueltos en la conexión (RLS); no se filtra acá.
+		exists, err := uc.notificationRepo.ExistsByDedupKey(ctx, req.DedupKey)
 		if err != nil {
 			log.Warn("Dedup DB check failed, continuing (UNIQUE index is final backstop)",
 				zap.String("dedup_key", req.DedupKey), zap.Error(err))

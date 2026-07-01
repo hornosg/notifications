@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	appctx "notifications/src/notification/application/appcontext"
 	"notifications/src/notification/application/request"
 	"notifications/src/notification/domain"
 	"notifications/src/notification/domain/port"
@@ -48,10 +47,9 @@ func (uc *ListNotificationsUseCase) Execute(ctx context.Context, req *request.Li
 		return nil, fmt.Errorf("servicio de base de datos no disponible")
 	}
 
-	// Convertir request a filtros, inyectando namespace/tenant desde el contexto RLS.
+	// Convertir request a filtros. namespace/tenant NO se inyectan acá: los aplica RLS
+	// solo, vía la conexión con las GUC de sesión ya fijadas — decisión E23 2026-07-01.
 	filters := req.ToFilters()
-	filters.Namespace = appctx.NamespaceFromContext(ctx)
-	filters.TenantID = appctx.TenantIDFromContext(ctx)
 
 	// Buscar notificaciones
 	notifications, err := uc.notificationRepo.FindByFilters(ctx, filters)
