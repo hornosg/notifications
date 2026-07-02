@@ -48,11 +48,10 @@ func main() {
 		RejectMissingTenant: multitenant, // fail-closed a nivel HTTP
 	}))
 
-	// Aislamiento fail-closed a nivel DB (RULE-10): conexión fijada + SET app.tenant_id.
+	// Aislamiento fail-closed a nivel DB (RULE-10): cada repository abre su propia
+	// transacción con go-shared postgres.WithRLSInTransaction (SET LOCAL), ver PROP-007.
+	// Ya no hay middleware que fije una conexión por request.
 	db := connectDB(log)
-	if db != nil && multitenant {
-		r.Use(database.TenantSession(db, log))
-	}
 
 	cfg, err := sharedconfig.LoadConfig()
 	if err != nil {

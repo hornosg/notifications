@@ -9,8 +9,9 @@ import (
 // NotificationRepository persiste y recupera notificaciones.
 //
 // Los métodos de lectura NO reciben namespace/tenantID: la conexión que usa la
-// implementación (database.ConnFromContext) ya tiene esos valores fijados como GUC de
-// sesión por database.TenantSession, y las policies RLS (002_rls.sql) filtran solas.
+// implementación abre su propia transacción vía go-shared postgres.WithRLSInTransaction
+// (SET LOCAL, PROP-007), que fija esos valores como GUC de sesión, y las policies RLS
+// (002_rls.sql) filtran solas.
 // No repetir el filtro en la query es una decisión explícita — confiar en RLS como única
 // fuente de aislamiento (decisión E23 2026-07-01), no defensa en profundidad con doble filtro.
 type NotificationRepository interface {
@@ -39,7 +40,7 @@ type TemplateRepository interface {
 // notification-service resolvía el namespace abriendo su propia transacción con
 // postgres.ContextWithRLS(context.Background(), ...), pero acá no hay tal atajo — la
 // única conexión válida es la que trae los GUC de sesión ya fijados por
-// database.TenantSession (ver ADR-001). Sin ctx del caller no hay namespace real que
+// go-shared postgres.WithRLSInTransaction (ver ADR-001). Sin ctx del caller no hay namespace real que
 // resolver.
 type TemplateService interface {
 	RenderTemplateByAction(ctx context.Context, action domain.NotificationAction, notificationType domain.NotificationType, data map[string]interface{}) (subject string, html string, err error)

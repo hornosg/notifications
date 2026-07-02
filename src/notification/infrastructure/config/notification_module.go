@@ -20,7 +20,6 @@ import (
 	"notifications/src/notification/infrastructure/template"
 	"notifications/src/notification/infrastructure/worker"
 	sharedconfig "notifications/src/shared/config"
-	"notifications/src/shared/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mercadocercano/eventbus"
@@ -37,9 +36,9 @@ func SetupNotificationModule(router *gin.RouterGroup, cfg *sharedconfig.Config, 
 	var projectConfigRepo port.ProjectConfigRepository
 
 	if db != nil {
-		templateRepo = repository.NewPostgresTemplateRepository()
-		notificationRepo = repository.NewPostgresNotificationRepository()
-		projectConfigRepo = repository.NewPostgresProjectConfigRepository()
+		templateRepo = repository.NewPostgresTemplateRepository(db)
+		notificationRepo = repository.NewPostgresNotificationRepository(db)
+		projectConfigRepo = repository.NewPostgresProjectConfigRepository(db)
 	}
 
 	templateService := template.NewTemplateService(templateRepo, cfg.Contact.Email)
@@ -66,7 +65,7 @@ func SetupNotificationModule(router *gin.RouterGroup, cfg *sharedconfig.Config, 
 			queueService = sqsQueue
 			log.Printf("SQS queue initialized successfully")
 
-			sqsWorker = worker.NewSQSWorker(queueService, emailSender, notificationRepo, db)
+			sqsWorker = worker.NewSQSWorker(queueService, emailSender, notificationRepo)
 			sqsWorker.Start(context.Background())
 			log.Printf("SQS worker started successfully")
 		}
@@ -108,16 +107,12 @@ func SetupNotificationModule(router *gin.RouterGroup, cfg *sharedconfig.Config, 
 	// Worker consumer del EventBus. Opt-in por EVENTBUS_ENABLED para no colgar el pod antes
 	// de cablear los secrets EVENTBUS_DB_*. Best-effort: si falla, loguea y sigue — el path
 	// HTTP sync no depende del EventBus.
-	setupEventWorker(cfg, sendNotificationUseCase, eventLogger, db)
+	setupEventWorker(cfg, sendNotificationUseCase, eventLogger)
 }
 
-func setupEventWorker(cfg *sharedconfig.Config, sender notificationevent.NotificationSender, eventLogger *notificationlog.NotificationLogger, db *sql.DB) {
+func setupEventWorker(cfg *sharedconfig.Config, sender notificationevent.NotificationSender, eventLogger *notificationlog.NotificationLogger) {
 	if !cfg.EventBus.Enabled {
 		log.Printf("EventBus consumer disabled (EVENTBUS_ENABLED != true), event-driven notifications inactive")
-		return
-	}
-	if db == nil {
-		log.Printf("Warning: no DB pool available, EventBus consumer disabled (fail-closed)")
 		return
 	}
 
@@ -141,7 +136,7 @@ func setupEventWorker(cfg *sharedconfig.Config, sender notificationevent.Notific
 
 	eventWorker := eventbus.NewEventWorker(processUseCase, infraLogger, 10, 5*time.Second)
 
-	handler := notificationevent.NewNotificationEventHandler(sender, eventLogger, db, logger.GetLogger())
+	handler := notificationevent.NewNotificationEventHandler(sender, eventLogger)
 	if err := eventWorker.RegisterHandler(handler); err != nil {
 		log.Printf("Warning: could not register notification event handler: %v", err)
 		return

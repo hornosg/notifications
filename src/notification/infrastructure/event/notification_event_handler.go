@@ -2,18 +2,15 @@ package event
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 
 	"github.com/mercadocercano/eventbus"
-	"go.uber.org/zap"
 
 	appctx "notifications/src/notification/application/appcontext"
 	"notifications/src/notification/application/request"
 	"notifications/src/notification/application/response"
 	"notifications/src/notification/domain/port"
-	"notifications/src/shared/database"
 )
 
 // NotificationSender es el subconjunto del use case de envío que el handler necesita.
@@ -35,20 +32,18 @@ type TenantRegisteredPayload struct {
 // NotificationEventHandler consume eventos de dominio del EventBus y los mapea a
 // notificaciones (patrón copiado de ledger-service: ConsumerName() + Handle()).
 //
-// db es obligatorio (no nil-safe como eventLogger): el EventBus worker corre fuera del
-// ciclo HTTP, así que database.TenantSession nunca fija una conexión acá — sin db este
-// handler no podría abrir su propia conexión scoped y sender.Execute fallaría siempre
-// al intentar persistir (fail-closed de ConnFromContext), ver ADR-001.
+// Corre fuera del ciclo HTTP, pero eso ya no requiere nada especial (PROP-007): cada
+// repository que toca sender.Execute abre su propia transacción vía go-shared
+// postgres.WithRLSInTransaction. Este handler solo tiene que dejar namespace/tenant en el
+// contexto (appctx.WithRLS) antes de invocar al use case.
 type NotificationEventHandler struct {
 	sender      NotificationSender
 	eventLogger port.NotificationEventLogger
-	db          *sql.DB
-	logger      *zap.Logger
 }
 
 // NewNotificationEventHandler crea el handler. eventLogger puede ser nil (nil-safe).
-func NewNotificationEventHandler(sender NotificationSender, eventLogger port.NotificationEventLogger, db *sql.DB, logger *zap.Logger) *NotificationEventHandler {
-	return &NotificationEventHandler{sender: sender, eventLogger: eventLogger, db: db, logger: logger}
+func NewNotificationEventHandler(sender NotificationSender, eventLogger port.NotificationEventLogger) *NotificationEventHandler {
+	return &NotificationEventHandler{sender: sender, eventLogger: eventLogger}
 }
 
 // ConsumerName identifica al consumidor en el event_consumers del EventBus.
@@ -122,20 +117,8 @@ func (h *NotificationEventHandler) handleTenantRegistered(ctx context.Context, e
 		NotificationType: notifType, Action: action,
 	})
 
-	var result *response.SendNotificationResult
-	scopedErr := database.WithScopedConn(ctx, h.db, namespace, p.TenantID, h.logger, func(scopedCtx context.Context) error {
-		scopedCtx = appctx.WithRLS(scopedCtx, namespace, p.TenantID)
-		result = h.sender.Execute(scopedCtx, req)
-		return nil
-	})
-	if scopedErr != nil {
-		h.logEvent(port.NotificationEvent{
-			Event: "notification.event_consume_failed", TenantID: p.TenantID, UserID: p.UserID,
-			NotificationType: notifType, Action: action, Reason: scopedErr.Error(),
-		})
-		// Sin conexión no hay forma de persistir: transitorio (DB caída) → reintentar.
-		return fmt.Errorf("notification send failed (no scoped db conn): %w", scopedErr)
-	}
+	scopedCtx := appctx.WithRLS(ctx, namespace, p.TenantID)
+	result := h.sender.Execute(scopedCtx, req)
 
 	if result != nil && !result.Success {
 		reason := "unknown"

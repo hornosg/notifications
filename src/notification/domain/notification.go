@@ -70,7 +70,7 @@ func IsValidAction(action NotificationAction) bool {
 
 // NotificationFilters para filtrar notificaciones.
 // No lleva Namespace/TenantID: el scope lo aplica RLS solo, vía la conexión con las GUC
-// de sesión ya fijadas por database.TenantSession (decisión E23 2026-07-01).
+// de sesión ya fijadas por go-shared postgres.WithRLSInTransaction (PROP-007).
 type NotificationFilters struct {
 	Type      *NotificationType   `json:"type,omitempty"`
 	Action    *NotificationAction `json:"action,omitempty"`

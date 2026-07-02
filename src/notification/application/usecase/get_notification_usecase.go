@@ -29,7 +29,7 @@ func (uc *GetNotificationUseCase) Execute(ctx context.Context, notificationID st
 		return nil, ErrNotificationNotFound
 	}
 
-	// namespace/tenant ya vienen resueltos en la conexión (RLS vía database.TenantSession);
+	// namespace/tenant ya vienen resueltos en la transacción (RLS vía go-shared postgres.WithRLSInTransaction);
 	// no se filtra acá — decisión E23 2026-07-01.
 	notification, err := uc.notificationRepo.FindByID(ctx, notificationID)
 	if err != nil {

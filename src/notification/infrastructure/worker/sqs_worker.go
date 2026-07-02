@@ -2,29 +2,26 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	appctx "notifications/src/notification/application/appcontext"
 	"notifications/src/notification/domain"
 	"notifications/src/notification/domain/port"
-	"notifications/src/shared/database"
 	"notifications/src/shared/logger"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
-// SQSWorker corre FUERA del ciclo HTTP: database.TenantSession (el middleware Gin que fija
-// la conexión + GUC de sesión por request) nunca se ejecuta acá. Por eso el worker recibe
-// el *sql.DB del pool y usa database.WithScopedConn para fijar su PROPIA conexión + GUCs
-// antes de tocar cualquier repository — mismo fail-closed que un request HTTP, aplicado
-// manualmente (advertido en ADR-001 al portar E23).
+// SQSWorker corre FUERA del ciclo HTTP, pero eso ya no requiere nada especial (PROP-007):
+// cada repository abre su propia transacción vía go-shared postgres.WithRLSInTransaction,
+// que solo necesita un *sql.DB — no hay conexión de request que fijar/soltar a mano. El
+// worker solo tiene que dejar namespace/tenant en el contexto (appctx.WithRLS) antes de
+// llamar a los repositories/emailSender, igual que hace el controller HTTP.
 type SQSWorker struct {
 	queue            port.Queue
 	emailSender      port.EmailSender
 	notificationRepo port.NotificationRepository
-	db               *sql.DB
 	logger           *zap.Logger
 	stopChan         chan struct{}
 	running          bool
@@ -34,13 +31,11 @@ func NewSQSWorker(
 	queue port.Queue,
 	emailSender port.EmailSender,
 	notificationRepo port.NotificationRepository,
-	db *sql.DB,
 ) *SQSWorker {
 	return &SQSWorker{
 		queue:            queue,
 		emailSender:      emailSender,
 		notificationRepo: notificationRepo,
-		db:               db,
 		logger:           logger.GetLogger(),
 		stopChan:         make(chan struct{}),
 		running:          false,
@@ -118,23 +113,10 @@ func (w *SQSWorker) processNotification(ctx context.Context, notification *domai
 		zap.String("action", string(notification.Action)),
 		zap.String("recipient", notification.Recipient))
 
-	if w.db == nil {
-		w.logger.Error("No DB pool configured for worker, cannot process notification (fail-closed)",
-			zap.String("notification_id", notification.ID))
-		return
-	}
-
-	err := database.WithScopedConn(ctx, w.db, notification.Namespace, notification.TenantID, w.logger, func(scopedCtx context.Context) error {
-		// appctx.WithRLS deja disponible namespace/tenant para el emailSender (resolución
-		// de identidad de envío por proyecto), en paralelo a la conexión ya scoped por RLS.
-		scopedCtx = appctx.WithRLS(scopedCtx, notification.Namespace, notification.TenantID)
-		w.handleScoped(scopedCtx, notification)
-		return nil
-	})
-	if err != nil {
-		w.logger.Error("Failed to fix scoped DB connection for worker",
-			zap.String("notification_id", notification.ID), zap.Error(err))
-	}
+	// appctx.WithRLS deja namespace/tenant en el contexto: cada repository/emailSender arma
+	// su propio postgres.RLSContext (go-shared) a partir de esto para su transacción.
+	scopedCtx := appctx.WithRLS(ctx, notification.Namespace, notification.TenantID)
+	w.handleScoped(scopedCtx, notification)
 }
 
 func (w *SQSWorker) handleScoped(scopedCtx context.Context, notification *domain.Notification) {

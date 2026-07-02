@@ -48,7 +48,7 @@ func (handler *NotificationHandler) SendNotification(ctx *gin.Context) {
 	log.Info("Request bound successfully", zap.String("type", req.Type), zap.String("action", req.Action))
 
 	// Namespace/tenant para embeber en la entidad — la conexión ya viene RLS-scoped desde
-	// database.TenantSession; esto solo arma el appctx que usan los use cases (ver
+	// go-shared postgres.WithRLSInTransaction; esto solo arma el appctx que usan los use cases (ver
 	// shared/middleware/rls.go: namespace SIEMPRE del JWT, nunca de un header).
 	reqCtx := middleware.ContextWithRLSFromGin(ctx)
 
