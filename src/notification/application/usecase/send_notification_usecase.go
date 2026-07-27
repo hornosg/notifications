@@ -89,7 +89,8 @@ func (uc *SendNotificationUseCase) isDuplicate(ctx context.Context, req *request
 	}
 
 	if uc.deduplicator != nil {
-		fresh, err := uc.deduplicator.MarkIfNew(ctx, namespace+":"+req.TenantID+":"+req.DedupKey)
+		// PLAT-E03: ntf:<tenant_id>:dedup:<id> (id incluye namespace:dedup_key).
+		fresh, err := uc.deduplicator.MarkIfNew(ctx, req.TenantID+":dedup:"+namespace+":"+req.DedupKey)
 		if err != nil {
 			log.Warn("Dedup Redis check failed, continuing", zap.Error(err))
 		} else if !fresh {

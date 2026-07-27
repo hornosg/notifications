@@ -15,6 +15,7 @@ type RedisDeduplicator struct {
 }
 
 // NewRedisDeduplicator crea el deduplicador. ttl<=0 cae al default de 1h.
+// El prefix sigue PLAT-E03: project key "ntf:" + tenant_id + ":dedup:" + id.
 func NewRedisDeduplicator(client *redis.Client, ttl time.Duration) *RedisDeduplicator {
 	if ttl <= 0 {
 		ttl = time.Hour
@@ -22,11 +23,12 @@ func NewRedisDeduplicator(client *redis.Client, ttl time.Duration) *RedisDedupli
 	return &RedisDeduplicator{
 		client: client,
 		ttl:    ttl,
-		prefix: "notif:dedup:",
+		prefix: "ntf:",
 	}
 }
 
 // MarkIfNew ejecuta SET key value NX EX ttl. true = la clave no existía (es nueva).
+// key debe venir ya formateada como "<tenant_id>:dedup:<id>".
 func (d *RedisDeduplicator) MarkIfNew(ctx context.Context, key string) (bool, error) {
 	return d.client.SetNX(ctx, d.prefix+key, "1", d.ttl).Result()
 }
