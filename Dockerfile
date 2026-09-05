@@ -1,8 +1,14 @@
 # notifications — build multi-stage (Devy golden path)
-FROM golang:1.25-bookworm AS build
+FROM golang:1.26-bookworm AS build
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
+# Módulos Go privados (go-shared, mercadocercano/*): el CI inyecta GITHUB_TOKEN como
+# build-arg (PLAT-E35 T2). Sin token, go mod download del módulo privado falla — igual
+# patrón que iam-service.
+ARG GITHUB_TOKEN
+ENV GOPRIVATE=github.com/hornosg/*,github.com/mercadocercano/*
+RUN if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .

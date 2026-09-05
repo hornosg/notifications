@@ -1,0 +1,22 @@
+# Caller del workflow reusable de imagen (PLAT-E35 T2) para notifications.
+# En push a main/master (y en tags v*) construye, escanea con Trivy y publica
+# ghcr.io/hornosg/notifications:<semver|sha> privado. `secrets: inherit` pasa GITHUB_TOKEN
+# (write:packages) y GO_PRIVATE_TOKEN si el repo lo define.
+name: Image — build + scan + push (GHCR)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    uses: ./.github/workflows/build-push-ghcr.yml
+    with:
+      image-name: notifications
+    secrets: inherit

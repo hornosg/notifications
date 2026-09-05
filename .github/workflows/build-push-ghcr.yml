@@ -1,0 +1,137 @@
+# Workflow REUSABLE — build multi-stage + gate Trivy + push a GHCR (privado).
+# PLAT-E35 T2. Parametrizado por nombre de imagen; lo consumen los repos del lab
+# (notifications acá mismo; iam-service vía `uses: hornosg/notifications/...@main` en T3).
+#
+# Convención de tagging: PLAT-E35 T1 (rules/platform-architecture.md §7) — cada push publica
+# `<semver>` y `sha-<short>` apuntando al mismo digest; `main` movible sólo por conveniencia.
+# Visibilidad: privada por default (decisión del owner, PLAT-PROP-009) → el repo GHCR nace
+# privado; nunca se marca público desde acá.
+#
+# Gate de seguridad: Trivy corre ANTES del push contra la imagen ya construida (load local).
+# Si hay CRITICAL/HIGH con fix disponible, el job falla y NO se pushea. `--ignore-unfixed`
+# evita frenar por CVEs sin parche upstream; las excepciones puntuales van al `.trivyignore`
+# versionado del repo llamador (con justificación por línea).
+name: Reusable — build + Trivy + push GHCR
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: "Nombre del servicio → ghcr.io/hornosg/<image-name>"
+        required: true
+        type: string
+      context:
+        description: "Build context"
+        required: false
+        default: "."
+        type: string
+      dockerfile:
+        description: "Path al Dockerfile (relativo al context)"
+        required: false
+        default: "Dockerfile"
+        type: string
+      target:
+        description: "Stage objetivo del multi-stage (vacío = último stage)"
+        required: false
+        default: ""
+        type: string
+      platforms:
+        description: "Plataformas del push"
+        required: false
+        default: "linux/amd64"
+        type: string
+      build-args:
+        description: "build-args extra (multilínea key=value)"
+        required: false
+        default: ""
+        type: string
+      trivyignore:
+        description: "Path al .trivyignore versionado del repo llamador"
+        required: false
+        default: ".trivyignore"
+        type: string
+    secrets:
+      GO_PRIVATE_TOKEN:
+        description: "Token para módulos Go privados (build-arg GITHUB_TOKEN). Opcional."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-scan-push:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/hornosg/${{ inputs.image-name }}
+      SCAN_REF: ${{ inputs.image-name }}:scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker metadata (tags T1 — semver + sha + main)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build local (load) SIN push: la imagen tiene que existir para escanearla antes de publicar.
+      # Single-platform a propósito — `load: true` no admite multi-arch; el push multi-arch va después.
+      - name: Build image (load local, sin push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.context }}/${{ inputs.dockerfile }}
+          target: ${{ inputs.target }}
+          load: true
+          push: false
+          tags: ${{ env.SCAN_REF }}
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}
+            ${{ inputs.build-args }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # GATE: si Trivy encuentra CRITICAL/HIGH con fix, exit-code 1 corta el job y no se pushea.
+      - name: Trivy — gate CRITICAL/HIGH
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.SCAN_REF }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: ${{ inputs.trivyignore }}
+
+      # Sólo se llega acá si Trivy pasó. Reusa la cache del build anterior → el push no recompila.
+      - name: Push a GHCR (sólo si Trivy pasó)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.context }}/${{ inputs.dockerfile }}
+          target: ${{ inputs.target }}
+          push: true
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}
+            ${{ inputs.build-args }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha
