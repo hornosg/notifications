@@ -109,7 +109,7 @@ jobs:
 
       # GATE: si Trivy encuentra CRITICAL/HIGH con fix, exit-code 1 corta el job y no se pushea.
       - name: Trivy — gate CRITICAL/HIGH
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 — por SHA: el tag `0.28.0` (sin v) no existía y la corrida 34739048277 murió en "Set up job"
         with:
           image-ref: ${{ env.SCAN_REF }}
           format: table
